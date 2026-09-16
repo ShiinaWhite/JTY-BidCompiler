@@ -1,0 +1,41 @@
+{
+  "profile": "example",
+  "_note": "项目配置模板。复制为 config/<你的项目>.json 后填写。真实项目配置不入库（见 .gitignore）。",
+  "title": "（示例）XX公司XX项目",
+  "project_number": "（平台项目编号，如 CCTCxxxxxxxx）",
+  "bidder": "（投标人法定全称）",
+  "inputs": {
+    "tender": "fixtures/<profile>/source/tender/<招标文件>.pdf",
+    "materials": "fixtures/<profile>/materials/materials.<profile>.json",
+    "asset_root": "fixtures/<profile>"
+  },
+  "outputs": {
+    "dir": "projects/<profile>/run-001",
+    "project": "project.json",
+    "requirements": "requirements.json",
+    "materials_manifest": "materials.json",
+    "matrix": "qualification_matrix.json",
+    "matrix_xlsx": "投标要求矩阵.xlsx",
+    "gaps_xlsx": "缺失材料清单.xlsx",
+    "lint_json": "bid-lint.json",
+    "lint_md": "bid-lint.md",
+    "selection": "selected_materials.json",
+    "bid_status": "bid_status.json"
+  },
+  "rules": {
+    "qualification": "rules/qualification_rules.json",
+    "performance": "rules/performance_five_elements.json",
+    "lint": "rules/lint_rules.json"
+  },
+  "contamination": {
+    "_note": "跨项目污染检查词表：本项目的产物里不得出现**其他项目**的变量。项目名、编号、甲方、投标截止日、特征设备词、保证金金额都要列全；金额必须写成带边界断言的正则。",
+    "forbidden_project": "（其他项目的简称）",
+    "forbidden_tokens": [
+      "（其他项目关键词）",
+      "（其他项目招标编号）",
+      "（其他项目投标截止日，如 2099-01-01）",
+      { "pattern": "人民币1\\.5万元", "label": "保证金金额 人民币1.5万元（其他项目口径）" },
+      "（其他项目特征设备/材料词）"
+    ]
+  }
+}

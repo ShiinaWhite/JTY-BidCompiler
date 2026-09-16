@@ -1,0 +1,210 @@
+{
+  "rule_set": "qualification_rules",
+  "version": "1.0",
+  "project": "（示例）电力设备改造/运维服务类招标项目",
+  "derived_from": "招标文件第一章「投标人资格要求」、第二章「投标人不得存在的情形」、第三章「资格评审标准」",
+  "rules": [
+    {
+      "rule_id": "RULE-QUAL-LICENSE",
+      "applies_to": [
+        "QUAL-3.1"
+      ],
+      "check": "MATERIAL_PRESENCE",
+      "params": {
+        "material_category": "营业执照",
+        "must_match_bidder_name": true,
+        "verdict_if_missing": "FAIL"
+      }
+    },
+    {
+      "rule_id": "RULE-QUAL-CERT-CX",
+      "applies_to": [
+        "QUAL-3.2"
+      ],
+      "check": "CERTIFICATE_LEVEL",
+      "params": {
+        "material_category": "资质证书_承装修试",
+        "license_name": "承装（修、试）电力设施许可证",
+        "required_classes": [
+          "承修",
+          "承试"
+        ],
+        "min_level": 3,
+        "level_order": [
+          "一级",
+          "二级",
+          "三级",
+          "四级",
+          "五级"
+        ],
+        "verdict_if_lower": "FAIL",
+        "verdict_if_missing": "FAIL"
+      }
+    },
+    {
+      "rule_id": "RULE-QUAL-SAFETY",
+      "applies_to": [
+        "QUAL-3.2"
+      ],
+      "check": "CERTIFICATE_VALIDITY",
+      "params": {
+        "material_category": "安全生产许可证",
+        "must_cover_date": "TENDER_DEADLINE",
+        "verdict_if_expired": "FAIL",
+        "verdict_if_missing": "FAIL"
+      }
+    },
+    {
+      "rule_id": "RULE-QUAL-PERFORMANCE",
+      "applies_to": [
+        "QUAL-3.3"
+      ],
+      "check": "PERFORMANCE_FIVE_ELEMENTS",
+      "params": {
+        "rule_file": "rules/performance_five_elements.json",
+        "min_valid_count": 1,
+        "evidence_required": [
+          "合同买卖双方盖章页",
+          "合同签订时间",
+          "体现10kV及以上电压等级的业绩信息页"
+        ],
+        "verdict_if_none": "FAIL"
+      }
+    },
+    {
+      "rule_id": "RULE-QUAL-CONSORTIUM",
+      "applies_to": [
+        "QUAL-3.4"
+      ],
+      "check": "DECLARATION",
+      "params": {
+        "expected": false,
+        "verdict": "PASS",
+        "note": "不允许联合体；投标文件写'不适用'即满足，无需素材"
+      }
+    },
+    {
+      "rule_id": "RULE-CREDIT-BLACKLIST",
+      "applies_to": [
+        "QUAL-1.4.3-13",
+        "QUAL-1.4.3-14"
+      ],
+      "check": "CREDIT_QUERY_FRESHNESS",
+      "params": {
+        "material_category": "信用查询",
+        "max_age_days": 30,
+        "required_platforms": [
+          "中国执行信息公开网",
+          "国家企业信用信息公示系统"
+        ],
+        "verdict_if_missing": "WAIT_COMPANY",
+        "verdict_if_stale": "WAIT_COMPANY"
+      }
+    },
+    {
+      "rule_id": "RULE-FIN-AUDIT",
+      "applies_to": [
+        "SCORE-BIZ-FIN"
+      ],
+      "check": "FINANCIAL_YEARS",
+      "params": {
+        "material_category": "财务审计报告",
+        "required_years": [
+          2023,
+          2024,
+          2025
+        ],
+        "missing_verdict": "WAIT_COMPANY",
+        "note": "缺失年度由公司提供；不得用未审计报表冒充审计报告"
+      }
+    }
+  ],
+  "scoring": {
+    "total": 100,
+    "price": 40,
+    "business": 10,
+    "technical": 50,
+    "business_items": [
+      {
+        "id": "SCORE-BIZ-PERF",
+        "name": "业绩",
+        "points": 5,
+        "rule": "满足资格业绩得1分，每多1个有效业绩加1分，最多加4分"
+      },
+      {
+        "id": "SCORE-BIZ-FIN",
+        "name": "企业综合实力及财务状况",
+        "points": 2,
+        "rule": "需提供经审计的财务报告扫描件（含财务报表）"
+      },
+      {
+        "id": "SCORE-BIZ-TERMS",
+        "name": "主要商务条款响应程度",
+        "points": 2
+      },
+      {
+        "id": "SCORE-BIZ-QUALITY",
+        "name": "投标文件编制质量",
+        "points": 1,
+        "rule": "格式/顺序/评标办法索引/业绩信息统计表可编辑版"
+      }
+    ]
+  },
+  "credit_evidence_mapping": [
+    {
+      "require_any": [
+        "严重违法失信",
+        "gsxt",
+        "国家企业信用信息公示系统"
+      ],
+      "evidence_any": [
+        "国家企业信用信息公示系统",
+        "gsxt",
+        "严重违法失信"
+      ],
+      "label": "国家企业信用信息公示系统（严重违法失信企业名单）",
+      "maps_to": "QUAL-143-13"
+    },
+    {
+      "require_any": [
+        "失信被执行人",
+        "执行信息公开"
+      ],
+      "evidence_any": [
+        "执行信息公开",
+        "失信被执行"
+      ],
+      "label": "中国执行信息公开网（失信被执行人名单）",
+      "maps_to": "QUAL-143-14"
+    },
+    {
+      "require_any": [
+        "失信惩戒",
+        "行业主管",
+        "集团失信"
+      ],
+      "evidence_any": [
+        "失信惩戒",
+        "集团",
+        "行业主管"
+      ],
+      "label": "招标人所属集团/行业主管失信惩戒查询",
+      "maps_to": "QUAL-143-15",
+      "note": "客户特定词（如具体集团名）由 config/<profile>.json 的 credit_evidence_extra 注入"
+    },
+    {
+      "require_any": [
+        "骗取中标",
+        "严重违约",
+        "重大工程质量"
+      ],
+      "evidence_any": [
+        "裁判文书",
+        "行政处罚",
+        "政府采购"
+      ],
+      "label": "司法/行政处罚记录查询",
+      "maps_to": "QUAL-143-12"
+    }
+  ]
+}

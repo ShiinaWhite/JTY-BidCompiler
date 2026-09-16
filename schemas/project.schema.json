@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jty.local/schemas/project.schema.json",
+  "title": "project.json —— 招标项目基本信息",
+  "description": "由招标文件解析得到。每个字段都是证据对象而非裸值：禁止只存最终值而不存证据位置。",
+  "type": "object",
+  "required": ["schema_version", "generated_by", "source_document", "fields"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "type": "string", "const": "1.0" },
+    "generated_by": {
+      "type": "object",
+      "required": ["tool", "tool_version", "generated_at"],
+      "properties": {
+        "tool": { "type": "string" },
+        "tool_version": { "type": "string" },
+        "generated_at": { "type": "string" },
+        "pipeline": { "type": "string" }
+      }
+    },
+    "source_document": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "pages": { "type": "integer", "minimum": 1 },
+        "title": { "type": "string" }
+      }
+    },
+    "fields": {
+      "type": "object",
+      "description": "键为字段名；每个字段值都是带证据的 FieldValue。缺失即 value=null 且 reason 说明原因，不得猜值。",
+      "required": [
+        "project_name", "project_number", "tenderer", "agency", "location",
+        "deadline", "service_period", "warranty", "bid_security",
+        "consortium_allowed", "platform", "submission_format"
+      ],
+      "additionalProperties": { "$ref": "#/$defs/FieldValue" },
+      "properties": {
+        "project_name": { "$ref": "#/$defs/FieldValue" },
+        "project_number": { "$ref": "#/$defs/FieldValue" },
+        "tenderer": { "$ref": "#/$defs/FieldValue" },
+        "agency": { "$ref": "#/$defs/FieldValue" },
+        "location": { "$ref": "#/$defs/FieldValue" },
+        "deadline": { "$ref": "#/$defs/FieldValue" },
+        "service_period": { "$ref": "#/$defs/FieldValue" },
+        "warranty": { "$ref": "#/$defs/FieldValue" },
+        "bid_security": { "$ref": "#/$defs/FieldValue" },
+        "consortium_allowed": { "$ref": "#/$defs/FieldValue" },
+        "platform": { "$ref": "#/$defs/FieldValue" },
+        "submission_format": { "$ref": "#/$defs/FieldValue" }
+      }
+    }
+  },
+  "$defs": {
+    "FieldValue": {
+      "type": "object",
+      "required": ["value", "source", "source_page", "confidence"],
+      "additionalProperties": false,
+      "description": "有值必须有出处：value 非 null 时 source 必须是 Source 对象；value 为 null 时 source 必须为 null 且给出 reason。这条用 anyOf+not 强制，防止有人只存最终值。",
+      "anyOf": [
+        {
+          "properties": { "value": { "type": "null" }, "source": { "type": "null" } }
+        },
+        {
+          "properties": {
+            "value": { "not": { "type": "null" } },
+            "source": { "$ref": "#/$defs/Source" }
+          }
+        }
+      ],
+      "properties": {
+        "value": {
+          "description": "字段值；未找到时为 null",
+          "type": ["string", "number", "boolean", "null"]
+        },
+        "value_normalized": {
+          "description": "规范化值（日期 ISO、金额元、布尔等），便于程序比较；未找到时不出现",
+          "type": ["string", "number", "boolean", "null"]
+        },
+        "source": {
+          "description": "证据出处。是否允许为 null 由上面的 anyOf 决定（无值时必须为 null）",
+          "anyOf": [{ "$ref": "#/$defs/Source" }, { "type": "null" }]
+        },
+        "source_page": {
+          "description": "命中页码（1-based，等于 PDF 实际页）；未找到时为 null",
+          "type": ["integer", "null"]
+        },
+        "source_section": {
+          "description": "所属章节/条款号，如 '第一章 3.3'；未知为 null",
+          "type": ["string", "null"]
+        },
+        "confidence": {
+          "description": "0~1。规则强锚定（条款号+关键词）=高；仅关键词=中；未找到=0",
+          "type": "number", "minimum": 0, "maximum": 1
+        },
+        "extraction_method": {
+          "type": "string",
+          "enum": ["RULE_REGEX", "RULE_KEYWORD", "TABLE_PARSE", "MANUAL_CONFIRMED", "NOT_FOUND"]
+        },
+        "reason": {
+          "description": "当 value 为 null 时必填，说明为什么没抽到",
+          "type": ["string", "null"]
+        },
+        "candidates": {
+          "description": "同一字段命中的多个候选证据（用于人工复核与后续消歧）",
+          "type": "array",
+          "items": { "$ref": "#/$defs/Source" }
+        }
+      }
+    },
+    "Source": {
+      "type": "object",
+      "required": ["document", "page", "quote"],
+      "additionalProperties": false,
+      "properties": {
+        "document": { "type": "string", "description": "文件名或 fixture 相对路径" },
+        "page": { "type": "integer", "minimum": 1 },
+        "quote": { "type": "string", "description": "招标文件原文引用（未经改写的原句片段）" },
+        "section": { "type": ["string", "null"] },
+        "match_rule": { "type": ["string", "null"], "description": "命中的规则 id，用于审计" }
+      }
+    }
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jty.local/schemas/bid_lint.schema.json",
+  "title": "bid-lint.json —— 投标文件自动 QA 结果",
+  "description": "每条检查项只允许三种结论：PASS / FAIL / WAIT_COMPANY。FAIL 必须给出可定位的证据。",
+  "type": "object",
+  "required": ["schema_version", "generated_at", "targets", "checks", "summary"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "type": "string", "const": "1.0" },
+    "generated_at": { "type": "string" },
+    "targets": {
+      "type": "object",
+      "description": "本次 lint 检查的对象（各带 sha256 以便复现）",
+      "additionalProperties": true
+    },
+    "checks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Check" }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["PASS", "FAIL", "WAIT_COMPANY"],
+      "additionalProperties": { "type": "integer" }
+    }
+  },
+  "$defs": {
+    "Check": {
+      "type": "object",
+      "required": ["check_id", "title", "status", "severity"],
+      "additionalProperties": false,
+      "properties": {
+        "check_id": { "type": "string" },
+        "title": { "type": "string", "description": "一行结论文案，如 'PASS 承装修试'" },
+        "status": { "type": "string", "enum": ["PASS", "FAIL", "WAIT_COMPANY"] },
+        "severity": { "type": "string", "enum": ["BLOCKER", "MAJOR", "MINOR", "INFO"] },
+        "rule": { "type": ["string", "null"], "description": "生效的规则 id" },
+        "detail": { "type": ["string", "null"] },
+        "hits": {
+          "type": "array",
+          "description": "命中明细，必须可定位（文件+页/段落+原文）",
+          "items": {
+            "type": "object",
+            "required": ["quote"],
+            "properties": {
+              "quote": { "type": "string" },
+              "location": { "type": ["string", "null"] },
+              "line": { "type": ["integer", "null"] },
+              "rule": { "type": ["string", "null"] },
+              "note": { "type": ["string", "null"] }
+            }
+          }
+        },
+        "action": { "type": ["string", "null"], "description": "建议动作（谁做什么）" },
+        "owner": { "type": ["string", "null"], "enum": [null, "COMPILER", "COMPANY", "USER"] }
+      }
+    }
+  }
+}

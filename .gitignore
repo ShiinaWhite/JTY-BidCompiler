@@ -1,0 +1,87 @@
+# JTY-BidCompiler .gitignore
+#
+# 分层原则（详见 docs/repository_publication_audit.md）：
+#   ① 本仓库只跟踪**代码与契约**：src/ schemas/ rules/ scripts/ tests/ + 配置模板
+#   ② 真实项目输入（招标文件、投标文件、核验表、扫描件）**永不入库**
+#   ③ 真实项目输出（结构化产物、Excel、评分报告、交付包）**永不入库**
+#   ④ 公司素材库（含真实人员、证件号、合同金额、证据原文）**永不入库**
+#
+# 这些文件在本地磁盘上照常保留、照常可用；只是不进入 Git。
+
+# ── 真实项目输入 ──────────────────────────────────────────────
+fixtures/
+!fixtures/README.md
+
+# ── 真实项目输出 ──────────────────────────────────────────────
+projects/
+reports/
+review-package/
+
+# ── 含真实项目数据的配置（保留 example 模板）────────────────────
+config/*.local.json
+# 真实项目配置按需逐个排除（见审计文档 §4.1）
+config/*.json
+!config/example.json
+!config/example.json
+
+# ── 含真实项目数据的文档 ──────────────────────────────────────
+docs/*Gold Test基准.md
+docs/第一轮测试报告.md
+docs/阶段1.5*.md
+docs/2026真实项目测试语料清单.md
+docs/ZCode交接*.md
+
+# ── 真实项目的 Gold oracle（含招标条款原文 token）────────────────
+tests/gold/*/
+!tests/gold/example/
+
+# ── Python ───────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# ── 编辑器 ───────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*~
+
+# ── Office 临时/锁文件 ───────────────────────────────────────
+~$*
+*.tmp
+
+# ── 二进制/大文件兜底（即使放在允许目录内也不入库）────────────
+*.pdf
+*.docx
+*.doc
+*.zip
+*.rar
+*.7z
+*.xlsx
+*.xls
+!fixtures/README.md
+
+# ── 密钥与凭据 ───────────────────────────────────────────────
+*.pem
+*.key
+*.p12
+*.pfx
+.env
+.env.*
+secrets.json
+credentials.json
+projects/_local_tools/
+
+# ── 公开仓库专有 ─────────────────────────────────────────────
+# 合成示例配置与合成语料是**公开安全**的，允许入库
+!config/synthetic.json
+!tests/synthetic/**
+# 反忽略只针对源码与语料：字节码缓存必须继续忽略（.pyc 里含本机绝对路径）
+tests/synthetic/**/__pycache__/
+tests/synthetic/**/*.py[cod]

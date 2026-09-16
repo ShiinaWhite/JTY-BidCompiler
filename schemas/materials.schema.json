@@ -1,0 +1,270 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jty.local/schemas/materials.schema.json",
+  "title": "materials.json —— 公司素材 manifest",
+  "description": "公司可用素材的清单。字段缺失一律 null，禁止猜测填充（见 README 红线 3）。",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "generated_at",
+    "source",
+    "materials"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "generated_at": {
+      "type": "string"
+    },
+    "source": {
+      "type": "object",
+      "description": "本 manifest 的来源描述；本地目录 / 已核验核验表 / 未来 Paperless",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "local_fixture",
+            "local_directory",
+            "paperless_rest",
+            "spreadsheet_verified"
+          ]
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provenance": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "file": {
+                "type": "string"
+              },
+              "sha256": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "role": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "materials": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Material"
+      }
+    }
+  },
+  "$defs": {
+    "Material": {
+      "type": "object",
+      "required": [
+        "material_id",
+        "category",
+        "title",
+        "company",
+        "verification_status",
+        "source_file"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "material_id": {
+          "type": "string",
+          "pattern": "^M-[A-Z0-9-]+$"
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "营业执照",
+            "资质证书_承装修试",
+            "资质证书_施工总承包",
+            "安全生产许可证",
+            "管理体系认证",
+            "专利",
+            "软件著作权",
+            "业绩合同",
+            "财务审计报告",
+            "纳税信用",
+            "信用查询",
+            "企业荣誉",
+            "人员证书",
+            "设备机具",
+            "其他"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "company": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "主体名称；未知为 null"
+        },
+        "person": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "人员类素材的姓名"
+        },
+        "certificate_number": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "issue_date": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "签发/发证日期 YYYY-MM-DD"
+        },
+        "expiry_date": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "有效期截止 YYYY-MM-DD；长期有效为 null 并注明"
+        },
+        "contract_party": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "业绩合同甲方"
+        },
+        "contract_date": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "业绩合同签订日期 YYYY-MM-DD"
+        },
+        "contract_amount": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "合同金额（保持原文口径写法，如 'XX.X万元'）"
+        },
+        "voltage_level": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "电压等级原文，如 '35kV/10kV'"
+        },
+        "voltage_level_kv": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "可比较的最高电压等级（kV）；无法确定填 null"
+        },
+        "project_type": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "工作类型原文，如 '维护/检修/试验'"
+        },
+        "keywords": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "verification_status": {
+          "type": "string",
+          "enum": [
+            "VERIFIED",
+            "PARTIALLY_VERIFIED",
+            "PENDING_COMPANY",
+            "REJECTED",
+            "EXPIRED"
+          ]
+        },
+        "source_file": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "素材所在文件（本地路径或 Paperless document id）。null = 素材本体尚不存在（如 PENDING_COMPANY 的待提供件），这本身就是要报告的事实"
+        },
+        "source_pages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "证据页定位，如 ['image127','image128'] 或 ['p83','p84']"
+        },
+        "evidence_spans": {
+          "type": "array",
+          "description": "已核验的原文片段——五要素判定只能基于这里的原文，不得由模型自由发挥",
+          "items": {
+            "type": "object",
+            "required": [
+              "label",
+              "text"
+            ],
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string",
+                "description": "合同/证件原文（逐字）"
+              },
+              "source_page": {
+                "type": [
+                  "integer",
+                  "string",
+                  "null"
+                ]
+              },
+              "source_ref": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}

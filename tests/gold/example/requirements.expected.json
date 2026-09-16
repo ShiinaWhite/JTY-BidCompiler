@@ -1,0 +1,63 @@
+{
+  "oracle": "example/requirements",
+  "note": "合成示例 oracle：展示 Gold 期望值的格式。真实项目 oracle 属 PRIVATE_TEST_DATA，不入库。",
+  "severity_definition": {
+    "HARD": "不满足即否决",
+    "SCORE": "评分项",
+    "NORMAL": "需响应但不单独否决",
+    "INFO": "仅记录"
+  },
+  "match_rule": {
+    "token_match": "归一化后须包含 tokens 全部子串",
+    "page_match": "source_page 须落在 pages 内"
+  },
+  "counts": {
+    "HARD": 2,
+    "SCORE": 1,
+    "NORMAL": 1
+  },
+  "hard": [
+    {
+      "id": "QUAL-3-1",
+      "page": 3,
+      "type": "QUALIFICATION",
+      "tokens": [
+        "营业执照",
+        "法人"
+      ]
+    },
+    {
+      "id": "QUAL-3-2",
+      "page": 3,
+      "type": "PERFORMANCE",
+      "tokens": [
+        "自2023年1月1日",
+        "10kV",
+        "维护",
+        "至少1项"
+      ]
+    }
+  ],
+  "score": [
+    {
+      "id": "SCORE-BIZ-1",
+      "page": 5,
+      "type": "COMMERCIAL",
+      "tokens": [
+        "每增加1项",
+        "得1分"
+      ]
+    }
+  ],
+  "normal": [
+    {
+      "id": "SPEC-001",
+      "page": 9,
+      "type": "TECHNICAL",
+      "tokens": [
+        "巡检",
+        "报告"
+      ]
+    }
+  ]
+}

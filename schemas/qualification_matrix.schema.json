@@ -1,0 +1,225 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jty.local/schemas/qualification_matrix.schema.json",
+  "title": "qualification_matrix.json —— 要求×素材匹配结论",
+  "description": "每条要求的候选材料、证据链与判定。判定只取封闭集合，不允许'可能满足'这类模糊结论。",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "generated_at",
+    "verdict_lexicon",
+    "entries",
+    "summary"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "generated_at": {
+      "type": "string"
+    },
+    "source": {
+      "type": "object",
+      "description": "素材仓库来源描述（便于复现判定）"
+    },
+    "verdict_lexicon": {
+      "type": "object",
+      "description": "判定词表（沿用人工核验口径，禁止引入模糊词）",
+      "properties": {
+        "PASS": {
+          "type": "string"
+        },
+        "FAIL": {
+          "type": "string"
+        },
+        "EVIDENCE_INSUFFICIENT": {
+          "type": "string"
+        },
+        "WAIT_COMPANY": {
+          "type": "string"
+        },
+        "NOT_EVALUATED": {
+          "type": "string"
+        }
+      }
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Entry"
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "PASS",
+        "FAIL",
+        "EVIDENCE_INSUFFICIENT",
+        "WAIT_COMPANY",
+        "NOT_EVALUATED"
+      ],
+      "additionalProperties": {
+        "type": "integer"
+      }
+    }
+  },
+  "$defs": {
+    "Entry": {
+      "type": "object",
+      "required": [
+        "requirement_id",
+        "requirement_type",
+        "severity",
+        "status",
+        "candidates",
+        "evidence_chain",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "requirement_id": {
+          "type": "string"
+        },
+        "requirement_type": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "HARD",
+            "SCORE",
+            "NORMAL",
+            "INFO"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "PASS",
+            "FAIL",
+            "EVIDENCE_INSUFFICIENT",
+            "WAIT_COMPANY",
+            "NOT_EVALUATED"
+          ]
+        },
+        "selected": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "选定使用的 material_id"
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "material_id",
+              "status"
+            ],
+            "properties": {
+              "material_id": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "score": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "reasons": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "five_elements": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "blocking_elements": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "evidence_chain": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "claim",
+              "quote"
+            ],
+            "properties": {
+              "claim": {
+                "type": "string"
+              },
+              "quote": {
+                "type": "string"
+              },
+              "material_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "source_ref": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "source_page": {
+                "type": [
+                  "integer",
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "reason": {
+          "type": "string"
+        },
+        "missing_info": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "owner": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            null,
+            "COMPILER",
+            "COMPANY",
+            "USER"
+          ],
+          "description": "未决项由谁解决：编译器缺能力 / 公司提供真实材料 / 用户决策"
+        },
+        "condition": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "该要求的结构化条件（落盘以便追溯判定依据）"
+        }
+      }
+    }
+  }
+}

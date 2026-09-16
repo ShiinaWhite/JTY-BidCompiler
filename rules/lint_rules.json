@@ -1,0 +1,232 @@
+{
+  "rule_set": "lint_rules",
+  "version": "1.0",
+  "derived_from": [
+    "人工QA实践沉淀（总装QA / 回料装配QA / 补强装配QA / 信用材料装配QA）",
+    "V1.1.1 复验项：孤悬标题0 / 禁词0 / 旧项目污染0 / 旧标准编号0残留"
+  ],
+  "checks": [
+    {
+      "check_id": "LINT-LEGACY-PROJECT",
+      "title": "旧项目/被否决业绩污染扫描",
+      "severity": "BLOCKER",
+      "kind": "FORBIDDEN_KEYWORDS",
+      "params": {
+        "keywords_from_config": "contamination.forbidden_tokens",
+        "note": "旧项目/被否决业绩的关键词表**不在规则文件里硬编码**——按项目配置于 config/<profile>.json 的 contamination.forbidden_tokens（含项目名、编号、甲方、投标截止日、特征设备词、保证金金额）。真实词表的示例见 docs/repository_publication_audit.md。"
+      },
+      "action": "删除相关段落或替换为本项目事实；旧项目素材不得复用"
+    },
+    {
+      "check_id": "LINT-INTERNAL-WORDS",
+      "title": "内部工作词扫描",
+      "severity": "BLOCKER",
+      "kind": "FORBIDDEN_KEYWORDS",
+      "params": {
+        "keywords": [
+          {
+            "keyword": "待补",
+            "allow_context": [
+              "待补齐、核实后再行办理"
+            ]
+          },
+          "待确认",
+          "待定",
+          "待提供",
+          "待公司",
+          "待核实",
+          {
+            "keyword": "占位",
+            "allow_context": [
+              "元件占位",
+              "占位尺寸",
+              "空间占位",
+              "占位测量"
+            ]
+          },
+          "TODO",
+          "TBD",
+          "XXX",
+          "GPT",
+          "AI认为",
+          "证据不足",
+          "未认定",
+          "Q-0",
+          "Q-PER",
+          "Q-DEV",
+          "Q-FIN",
+          "image1",
+          "image2",
+          "图片待",
+          "此处插入"
+        ],
+        "note": "内部编号/协作词/占位符一旦进入正式投标文件即为重大瑕疵。带 allow_context 的词有合法工程语义（如'占位'指元件占用空间、'待补'出现在合同履行语句中），只作提示不判 FAIL——误报会稀释整张 QA 表的价值。"
+      },
+      "action": "清理内部用语，改为可直接提交的书面表述"
+    },
+    {
+      "check_id": "LINT-PLACEHOLDER-EMPTY",
+      "title": "空白占位与未填项扫描",
+      "severity": "MAJOR",
+      "kind": "PLACEHOLDER_PATTERN",
+      "params": {
+        "patterns": [
+          "（空）",
+          "\\(空\\)",
+          "＿＿",
+          "____",
+          "【\\s*】",
+          "\\[\\s*\\]"
+        ],
+        "note": "报价表价格列/签署位允许留白（由公司填写），但不能出现'（空）'这类编辑痕迹"
+      },
+      "action": "区分'待公司填写的正规空白'与'编辑痕迹'；后者必须清除"
+    },
+    {
+      "check_id": "LINT-OBSOLETE-STANDARD",
+      "title": "旧标准编号残留扫描",
+      "severity": "MINOR",
+      "kind": "FORBIDDEN_KEYWORDS",
+      "params": {
+        "keywords": [
+          "GB 1408-89",
+          "GB1408-89",
+          "GB/T 11022-2011",
+          "GB3906",
+          "GB1984",
+          "GB311",
+          "IEC56",
+          "IEC694",
+          "IEC298"
+        ],
+        "note": "招标文件列的是老编号（GB1408-89 等）；技术正文如直接照抄旧编号会与现行标准体系脱节。历史整改中已替换16处，此处仅作残留扫描。"
+      },
+      "action": "核对是否需替换为现行标准编号（需技术负责人确认，不自动改）"
+    },
+    {
+      "check_id": "LINT-QUAL-VERDICTS",
+      "title": "资格项判定汇总",
+      "severity": "BLOCKER",
+      "kind": "FROM_MATRIX",
+      "params": {
+        "sources": [
+          "qualification_matrix.json"
+        ]
+      },
+      "action": "任何 HARD 项 FAIL 则不可提交"
+    },
+    {
+      "check_id": "LINT-MISSING-FIELDS",
+      "title": "关键字段/签署信息缺失",
+      "severity": "MAJOR",
+      "kind": "MISSING_FIELDS",
+      "params": {
+        "required": [
+          "project_number",
+          "deadline",
+          "bid_security"
+        ],
+        "note": "报价总额、税率、日期、法定代表人签章属于公司/用户填写项，计入 WAIT_COMPANY 而非 FAIL"
+      }
+    },
+    {
+      "check_id": "LINT-EXPIRED-CERT",
+      "title": "证件有效期覆盖检查",
+      "severity": "BLOCKER",
+      "kind": "EXPIRY_COVERAGE",
+      "params": {
+        "must_cover_date": "TENDER_DEADLINE",
+        "note": "所有带有效期的证件须覆盖投标截止日。真实历史案例中曾出现「安全生产考核合格证已过期」「身份证已过期」两类硬缺口——证件有效性一律按本项目投标截止日重判"
+      }
+    },
+    {
+      "check_id": "LINT-PERF-WINDOW",
+      "title": "业绩时间与电压复核",
+      "severity": "BLOCKER",
+      "kind": "FROM_MATRIX",
+      "params": {
+        "requirement_ids": [
+          "QUAL-3-3"
+        ],
+        "note": "业绩须同时满足 2023-01-01 以后 与 10kV 及以上；两者都不允许'接近即可'"
+      }
+    },
+    {
+      "check_id": "LINT-PERSONNEL",
+      "title": "人员待确认",
+      "severity": "MAJOR",
+      "kind": "PENDING_ITEMS",
+      "params": {
+        "pending_ids": [
+          "Q-PER-01",
+          "Q-PER-02",
+          "Q-PER-03",
+          "Q-PER-04"
+        ],
+        "note": "拟派人员名单与证件由公司确定，编译器不得虚构"
+      }
+    },
+    {
+      "check_id": "LINT-PRICE",
+      "title": "报价待确认",
+      "severity": "MAJOR",
+      "kind": "PENDING_ITEMS",
+      "params": {
+        "pending_ids": [
+          "Q-COMM-01"
+        ],
+        "note": "报价与税率由公司决策，编译器只做完整性检查"
+      }
+    },
+    {
+      "check_id": "LINT-BID-SECURITY",
+      "title": "投标保证金待确认",
+      "severity": "MAJOR",
+      "kind": "PENDING_ITEMS",
+      "params": {
+        "pending_ids": [
+          "Q-COMM-02"
+        ],
+        "note": "保证金缴纳凭证须由公司按平台专用账号电汇后提供"
+      }
+    }
+  ],
+  "pending_items_catalog": {
+    "Q-PER-01": {
+      "title": "项目团队实际拟派人员名单及岗位",
+      "owner": "COMPANY"
+    },
+    "Q-PER-02": {
+      "title": "拟派人员全部相关证明材料（含特种作业操作证）",
+      "owner": "COMPANY"
+    },
+    "Q-PER-03": {
+      "title": "关键人员证件有效期覆盖投标截止日",
+      "owner": "COMPANY"
+    },
+    "Q-PER-04": {
+      "title": "人员参加工作年限与职称确认",
+      "owner": "COMPANY"
+    },
+    "Q-DEV-01": {
+      "title": "本项目实际可投入设备及试验仪器清单",
+      "owner": "COMPANY"
+    },
+    "Q-COMM-01": {
+      "title": "投标总报价（含税）、大写金额、增值税税率及分项报价",
+      "owner": "COMPANY"
+    },
+    "Q-COMM-02": {
+      "title": "投标保证金缴纳凭证（金额与形式见本项目招标条款）",
+      "owner": "COMPANY"
+    },
+    "Q-COMM-03": {
+      "title": "材料配件规格型号与品牌",
+      "owner": "COMPANY"
+    },
+    "Q-SIGN-01": {
+      "title": "法定代表人/委托代理人签章与签署日期",
+      "owner": "USER"
+    }
+  }
+}

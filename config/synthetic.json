@@ -1,0 +1,40 @@
+{
+  "profile": "synthetic",
+  "_note": "**合成示例配置**：指向 tests/synthetic/ 下的合成招标文件与合成素材库，不含任何真实项目、公司、人员或证件数据。用于公开环境下跑通全流程。",
+  "title": "兴远市市政供水管网智慧化改造服务项目",
+  "project_number": "XYGS-2026-0417",
+  "bidder": "兴远智联水务科技有限公司",
+  "inputs": {
+    "tender": "tests/synthetic/source/tender/synthetic_tender.txt",
+    "materials": "tests/synthetic/source/materials.synthetic.json",
+    "asset_root": "tests/synthetic/source"
+  },
+  "outputs": {
+    "dir": "projects/synthetic/run-001",
+    "project": "project.json",
+    "requirements": "requirements.json",
+    "materials_manifest": "materials.json",
+    "matrix": "qualification_matrix.json",
+    "matrix_xlsx": "投标要求矩阵.xlsx",
+    "gaps_xlsx": "缺失材料清单.xlsx",
+    "lint_json": "bid-lint.json",
+    "lint_md": "bid-lint.md",
+    "selection": "selected_materials.json",
+    "bid_status": "bid_status.json"
+  },
+  "rules": {
+    "qualification": "rules/qualification_rules.json",
+    "performance": "rules/performance_five_elements.json",
+    "lint": "rules/lint_rules.json"
+  },
+  "contamination": {
+    "_note": "跨项目污染词表：本项目产物里不得出现**其他项目**的变量。此处列的是虚构的其他项目标识，用于演示该机制。",
+    "forbidden_project": "（虚构的其他项目）",
+    "forbidden_tokens": [
+      "北岭热力管网",
+      "BYRL-2025-0099",
+      "2026-11-30 09:00",
+      { "pattern": "人民币9\\.9万元", "label": "保证金金额 人民币9.9万元（其他项目口径）" }
+    ]
+  }
+}

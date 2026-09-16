@@ -1,0 +1,38 @@
+{
+  "oracle": "example/qualification",
+  "note": "合成示例：资格判定与三分法期望值格式。",
+  "qualification_verdicts": {
+    "QUAL-3-1": {
+      "expect": "PASS",
+      "reason": "已具备营业执照（示例）"
+    },
+    "QUAL-3-2": {
+      "expect": "PASS",
+      "selected_in": [
+        "M-PERF-002",
+        "M-PERF-003"
+      ],
+      "must_be_fail": {
+        "M-PERF-091": "对象与性质均不满足（示例）"
+      }
+    }
+  },
+  "commercial_expectations": {
+    "COMM-2": {
+      "expect": "NOT_EVALUATED",
+      "reason": "承诺类，待 Word 生成后核验"
+    }
+  },
+  "score_objective": {
+    "SCORE-BIZ-1": {
+      "expected_selected": "M-PERF-003",
+      "expected_eligible_materials": [
+        "M-PERF-003"
+      ],
+      "expected_excluded_must_not_pass": [
+        "M-PERF-001"
+      ],
+      "expected_points": 1
+    }
+  }
+}

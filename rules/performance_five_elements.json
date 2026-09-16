@@ -1,0 +1,82 @@
+{
+  "rule_set": "performance_five_elements",
+  "version": "1.0",
+  "derived_from": [
+    "招标文件第一章「投标人资格要求」中业绩条款原文（**逐项目解析，不内置于本文件**）",
+    "人工核验口径（业绩五要素核验表）"
+  ],
+  "requirement_text": "（本规则文件不内置任何项目的业绩条款。业绩条件由 parsers.qualification_classifier 从招标原文解析后按项目注入；解析不出来的项一律落到『证据不足』。）",
+  "verdicts": {
+    "PASS": "明确满足",
+    "FAIL": "明确不满足",
+    "EVIDENCE_INSUFFICIENT": "证据不足，不能认定"
+  },
+  "discipline": {
+    "forbidden_verdict_words": ["可能满足", "大概率满足", "类似业绩", "应该满足", "基本满足"],
+    "rule": "只允许 明确满足 / 明确不满足 / 证据不足（不能认定）。绝对禁止为了资格审查扩大解释合同内容。",
+    "evidence_required_for_pass": "五要素每一项都必须能引用合同原文；缺任一项即不得判 明确满足。"
+  },
+  "elements": [
+    {
+      "id": "E1",
+      "name": "合同主体",
+      "condition": "合同乙方 = 投标人（由 config/<profile>.bidder 注入）",
+      "type": "PARTY_MATCH",
+      "params": {
+        "bidder_names": ["（由 config/<profile>.bidder 注入）"],
+        "role": "乙方"
+      }
+    },
+    {
+      "id": "E2",
+      "name": "签订时间",
+      "condition": "合同签订日期 >= 2023-01-01 且 <= 投标截止时间（以合同签订日期为准）",
+      "type": "DATE_WINDOW",
+      "params": {
+        "not_before": "2023-01-01",
+        "not_after": "TENDER_DEADLINE",
+        "date_field": "contract_date"
+      }
+    },
+    {
+      "id": "E3",
+      "name": "电压等级",
+      "condition": "电压等级 >= 10kV",
+      "type": "VOLTAGE_AT_LEAST",
+      "params": { "min_kv": 10 }
+    },
+    {
+      "id": "E4",
+      "name": "工作对象",
+      "condition": "工作对象 = 本项目业绩条款解析出的对象（合同原文必须出现该对象，且处在被改造/维修/检修/维护的语境中）",
+      "type": "OBJECT_KEYWORD",
+      "params": {
+        "required_any": [],
+        "must_not_be_only_these": ["电缆", "光缆", "铁塔", "杆塔", "架空线路"],
+        "note": "对象词只能来自本项目条款（通用词表命中 → 从句推断 → 空）。为空时 E4 判『证据不足』，绝不默认成某个设备名；断言词列表由 parsers 注入，本文件不内置任何项目的对象词。"
+      }
+    },
+    {
+      "id": "E5",
+      "name": "工作性质",
+      "condition": "工作性质 = 改造或维修（含检修、抢修等同类语义；纯维护/纯试验/纯检测/新建安装不算）",
+      "type": "NATURE_KEYWORD",
+      "params": {
+        "accept_any": ["改造", "维修", "检修", "抢修"],
+        "reject_if_only": ["新建", "安装", "试验", "检测", "运维", "维护", "迁改", "缆化", "五防检查"],
+        "note": "招标要求写的是改造或维修；维护框架下的检修/维修条款可被接受，纯检测技术服务不被接受。**具体接受哪些性质词由本项目条款注入**（如要求『维护维修』时，维护即属证据），本文件只给默认兜底口径。"
+      }
+    }
+  ],
+  "quantity": {
+    "min_valid_count": 1,
+    "note": "资格业绩最少项数与商务评分每项分值由本项目条款解析（见条件 PERFORMANCE_SCORING 的 qualification_item_points / additional_points_per_item / max_additional_items）；本文件不内置分值。"
+  },
+  "manual_review_flags": [
+    {
+      "flag": "CONTRACT_TITLE_NOT_BINDING_OBJECT",
+      "trigger": "合同主名称不含本项目要求的对象字样，但正文服务范围明确列举该对象",
+      "action": "可判满足，但必须在报告中标注并要求人工终审口径；禁止改写合同名称去凑条件"
+    }
+  ]
+}
