@@ -13,12 +13,12 @@ PUBLIC_PUSH_READY = YES
 | 项 | 值 |
 |---|---|
 | 目录 | `JTY-BidCompiler-Public`（与内部生产仓库物理分离） |
-| 首提交 | `a3a546a Initial public release of JTY-BidCompiler` |
-| 提交数 | 2（**根提交 1 个**：全新历史，不含旧仓库任何提交；含本报告自身的提交） |
+| 根提交（仓库起点） | `a3a546a Initial public release of JTY-BidCompiler` |
+| 提交数 | 3（**根提交 1 个**；含本次快照提交——本报告随它一起入库） |
 | 提交者 | JTY BidCompiler <compiler@jty.local> |
 | 分支 | 1 个（`main`） |
-| tag / 远端 | 0 个 tag ／ 0 个远端（尚未 push） |
-| 提交内文件 | 73 个 |
+| tag / 远端 | 0 个 tag ／ 1 个远端（尚未 push） |
+| 提交内文件 | 74 个 |
 
 文件来源：`git archive HEAD`（**只取内部仓库已跟踪文件**）+ 公开专有文件
 （`LICENSE`、`SECURITY.md`、公开 `README.md`、合成示例 `config/synthetic.json` 与
@@ -42,9 +42,9 @@ PUBLIC_PUSH_READY = YES
 
 | 层次 | 对象 | 结果 |
 |---|---|---|
-| 导出目录（文本 + json/md/txt/yaml/toml + xlsx） | 72 个文件 | 敏感命中 **0** |
-| Git 对象库（含历史 blob） | 69 个 blob（共 97 个对象） | 敏感命中 **0** |
-| 提交内路径 | 73 条 | 私有目录 **0** 个，二进制兜底类型 **0** 个 |
+| 导出目录（文本 + json/md/txt/yaml/toml + xlsx） | 79 个文件 | 敏感命中 **0** |
+| Git 对象库（含历史 blob） | 82 个 blob（共 110 个对象） | 敏感命中 **0** |
+| 提交内路径 | 74 条 | 私有目录 **0** 个，二进制兜底类型 **0** 个 |
 
 扫描类别（词表本身保存在仓库之外的内部脚本，不随公开仓库发布）：
 真实项目名（中文/拼音）、招标编号、人员姓名、手机号、身份证号、证书编号、
@@ -53,7 +53,7 @@ PUBLIC_PUSH_READY = YES
 ## 4. 公开环境测试
 
 ```
-Ran 63 tests in 0.600s / OK (skipped=25)
+Ran 93 tests in 0.724s / OK (skipped=25)
 ```
 
 - FAIL / ERROR：**0**
@@ -88,4 +88,4 @@ python scripts_private/verify_public_commit.py --repo JTY-BidCompiler-Public
 导出脚本与核验脚本刻意放在**两个仓库之外**（`scripts_private/`），
 因为它们含有内部代号映射与敏感词表。
 
-> 本报告在首提交 `a3a546a`（根提交）之后用提交后核验数据生成，并随其后的一个提交入库；报告自身不含任何真实项目、公司、人员或证件信息。
+> 本报告在 Source Review Fix-1 提交之前用导出后核验数据生成，随该提交一起入库；报告自身不含任何真实项目、公司、人员或证件信息。

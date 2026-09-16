@@ -158,11 +158,25 @@ class TestMissingVsNonCompliant(unittest.TestCase):
     def test_negative_list_credit_uses_credit_queries(self):
         m = _matcher()
         req = {"id": "QUAL-143-14", "requirement_type": "CREDIT", "severity": "HARD",
+               "source_text": "被最高人民法院在“信用中国”网站列入失信被执行人名单",
                "evidence_required": ["信用查询"],
                "condition": {"rule": "NEGATIVE_LIST_SELFCHECK"}}
         entry = m._match_one(req)
         self.assertEqual(entry["status"], "PASS")
-        self.assertIn("信用", entry["reason"])
+        # 证据必须来自条款指定的那一类查询（失信被执行人 → 执行信息公开网）
+        self.assertIn("失信被执行人", entry["reason"])
+        self.assertEqual(entry["selected"], "M-CREDIT-001")
+
+    def test_credit_clause_without_mapping_is_fail_closed(self):
+        """陌生信用条款（映射不到证据来源）必须"证据不足"，不得拿任意信用材料顶替。"""
+        m = _matcher()
+        req = {"id": "QUAL-143-99", "requirement_type": "CREDIT", "severity": "HARD",
+               "source_text": "被某省某行业协会列入异常名录且未整改的",
+               "evidence_required": ["信用查询"],
+               "condition": {"rule": "NEGATIVE_LIST_SELFCHECK"}}
+        entry = m._match_one(req)
+        self.assertEqual(entry["status"], "EVIDENCE_INSUFFICIENT")
+        self.assertIsNone(entry["selected"])
 
 
 class TestRepositoryAbstraction(unittest.TestCase):

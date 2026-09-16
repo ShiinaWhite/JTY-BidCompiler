@@ -56,20 +56,34 @@ def build_selection(matrix: dict, requirements: list[dict], materials: list[dict
         })
 
     # 业绩三分法汇总：一份合同是真实业绩 ≠ 它能算资格/评分业绩
-    perf = next((e for e in matrix.get("entries", [])
-                 if e.get("requirement_type") == "PERFORMANCE" and e.get("candidates")), None)
+    perf_entries = [e for e in matrix.get("entries", [])
+                    if e.get("requirement_type") == "PERFORMANCE" and e.get("candidates")]
+    qual_entry = next((e for e in perf_entries
+                       if (e.get("role")
+                           or _role_of(e, req_by_id.get(e["requirement_id"], {}))) == "QUALIFICATION"),
+                      None)
     tri = {"QUALIFICATION_ELIGIBLE": [], "SCORE_ELIGIBLE": [], "SHOWCASE_ONLY": []}
-    if perf:
-        passing = [c["material_id"] for c in perf["candidates"] if c["status"] == "PASS"]
-        selected = perf.get("selected")
+    if qual_entry:
+        passing = [c["material_id"] for c in qual_entry["candidates"] if c["status"] == "PASS"]
+        selected = qual_entry.get("selected")
         for mid in passing:
             tri["QUALIFICATION_ELIGIBLE" if mid == selected else "SCORE_ELIGIBLE"].append(mid)
-        for c in perf["candidates"]:
+        for c in qual_entry["candidates"]:
             if c["status"] != "PASS":
                 tri["SHOWCASE_ONLY"].append(c["material_id"])
         tri["_rule"] = ("资格可用=满足招标资格口径且被选为资格业绩；评分可用=同样满足口径的其他业绩"
                         "（招标通常规定'每增加1项有效业绩加1分'）；"
                         "其余真实业绩仅作企业展示，不得计入资格或评分")
+    # 自带独立口径的评分业绩项（原文未声明"同资格要求"）：它判出来的业绩属"评分可用"，
+    # 但绝不能混进"资格可用"——那等于把没通过资格口径的业绩说成资格业绩。
+    for e in perf_entries:
+        if e is qual_entry:
+            continue
+        for c in e["candidates"]:
+            mid = c["material_id"]
+            if (c["status"] == "PASS" and mid not in tri["SCORE_ELIGIBLE"]
+                    and mid not in tri["QUALIFICATION_ELIGIBLE"]):
+                tri["SCORE_ELIGIBLE"].append(mid)
 
     return {
         "schema_version": "1.0",

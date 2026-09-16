@@ -121,7 +121,10 @@ class RequirementMatcher:
     # ------------------------------------------------------------------ #
     def match(self, requirements: list[dict]) -> dict:
         self._req_by_id = {r["id"]: r for r in requirements}
-        self._last_performance_result = None
+        # 业绩判定按 **requirement_id** 缓存：资格项与引用它的评分项共用同一份结果，
+        # 既不重复计算，也不会出现"评分项吃到别的资格条款结果"的串线
+        # （v1.5.3 的单槽 _last_performance_result 就是那么出错的）。
+        self._perf_cache: dict[str, dict] = {}
         entries = []
         for req in requirements:
             entries.append(self._match_one(req))
@@ -177,6 +180,7 @@ class RequirementMatcher:
             "CERTIFICATE_VALIDITY": self._h_certificate_validity,
             "PERFORMANCE_FIVE_ELEMENTS": self._h_performance,
             "PERFORMANCE_SCORING": self._h_performance_scoring,
+            "SCORE_PERFORMANCE_UNPARSED": self._h_score_performance_unparsed,
             "DECLARATION": self._h_declaration,
             "CREDIT_QUERY_FRESHNESS": self._h_credit,
             "FINANCIAL_YEARS": self._h_financial,
@@ -404,17 +408,15 @@ class RequirementMatcher:
                            (f"（{_num_to_cn(level)}级）" if min_level is not None else ""),
                            selected=target["material_id"])
 
-    def _h_performance(self, req, cond):
-        """业绩判定：阈值与词表**全部来自招标条款**（cond），不来自代码。
+    def _evaluate_performance(self, condition: dict) -> dict:
+        """业绩五要素的**唯一**评估实现：资格项与评分项都走这里。
 
-        同时输出三分法：QUALIFICATION_ELIGIBLE / SCORE_ELIGIBLE / SHOWCASE_ONLY。
-        不能因为一份合同是真实业绩就自动算资格业绩——这是本轮明确要补的口径。
+        返回 ``{"verdicts", "pass_ids", "selected", "evidence"}``。
+        素材状态护栏（MATERIAL_STATUS）在这里统一施加，任何调用方都绕不过去。
         """
-        min_count = int(cond.get("min_count", 1))
         mats = self.repo.by_category("业绩合同")
         evaluator = FiveElementEvaluator.from_rules_file(
-            self.perf_rules_path, deadline=self.deadline, condition=cond)
-        self._last_evaluator = evaluator
+            self.perf_rules_path, deadline=self.deadline, condition=condition)
         verdicts = [evaluator.evaluate(m, bidder=self.bidder) for m in mats]
         # 五要素只看合同内容；但**素材状态是资格红线**：
         # REJECTED / PENDING / 本项目时点已过期的业绩，即使五要素全部满足，
@@ -429,15 +431,42 @@ class RequirementMatcher:
                     [{"quote": f"{m.get('title')}（{m.get('verification_status')}）",
                       "source_ref": m.get("source_file")}]))
         passing = [v for v in verdicts if v.verdict == "PASS"]
-        # 留存资格口径的结果：评分条款（"要求同资格要求"）直接消费这份结果，
-        # 不重新猜五要素——两处各自判断就会漂移（v1.5.2 实测出现"跨项目业绩混进评分"的事故）
-        self._last_performance_result = {
-            "ref_id": req.get("id"),
-            "selected": passing[0].material_id if passing else None,
-            "pass_ids": [v.material_id for v in passing],
+        return {
             "verdicts": verdicts,
+            "pass_ids": [v.material_id for v in passing],
+            "selected": passing[0].material_id if passing else None,
             "evidence": passing[0].evidence_chain() if passing else [],
         }
+
+    def _performance_for(self, requirement_id: str, condition: dict) -> dict:
+        """按 requirement_id 取业绩评估结果（同一 requirement 只算一次）。
+
+        评分项只能通过 ``condition_ref`` 指定的资格条件拿到结果——
+        没有"取最近一次资格判定"这种隐式通路。
+        """
+        cache = getattr(self, "_perf_cache", None)
+        if cache is None:
+            cache = self._perf_cache = {}
+        if requirement_id not in cache:
+            cache[requirement_id] = self._evaluate_performance(condition)
+        return cache[requirement_id]
+
+    def _h_performance(self, req, cond):
+        """业绩判定：阈值与词表**全部来自招标条款**（cond），不来自代码。
+
+        同时输出三分法：QUALIFICATION_ELIGIBLE / SCORE_ELIGIBLE / SHOWCASE_ONLY。
+        不能因为一份合同是真实业绩就自动算资格业绩——这是本轮明确要补的口径。
+        """
+        min_count = int(cond.get("min_count", 1))
+        base = self._performance_for(req["id"], cond)
+        verdicts = base["verdicts"]
+        passing = [v for v in verdicts if v.verdict == "PASS"]
+        # 角色：资格业绩 vs **自带独立口径的评分业绩**。
+        # 后者（评分条款自己写了"35kV 以上运维业绩"这类口径、没引用资格条件）判出来的
+        # 业绩是"评分可用"，不是"资格可用"——不能混进资格三分法里。
+        is_scoring = req.get("severity") == "SCORE" or bool(cond.get("scoring"))
+        elig_pass = "SCORE_ELIGIBLE" if is_scoring else "QUALIFICATION_ELIGIBLE"
+        role_text = "评分口径" if is_scoring else "五要素"
 
         crit = (f"要求：≥{cond.get('min_kv')}kV、对象={'/'.join(cond.get('object_keywords') or [])}、"
                 f"性质={'/'.join(cond.get('nature_keywords') or [])}、"
@@ -453,7 +482,8 @@ class RequirementMatcher:
                                                for e in v.elements if e.blocking],
                 "five_elements": {e.element_id: e.status for e in v.elements},
                 "blocking_elements": v.blocking_elements,
-                "eligibility": "QUALIFICATION_ELIGIBLE" if v.verdict == "PASS" else "SHOWCASE_ONLY",
+                "partial_elements": v.partial_elements,
+                "eligibility": elig_pass if v.verdict == "PASS" else "SHOWCASE_ONLY",
             })
 
         if len(passing) >= min_count:
@@ -466,7 +496,7 @@ class RequirementMatcher:
                     "material_id": best.material_id,
                     "source_ref": best.title,
                 })
-            reason = (f"有 {len(passing)} 项业绩满足五要素（要求 ≥{min_count} 项）；"
+            reason = (f"有 {len(passing)} 项业绩满足{role_text}（要求 ≥{min_count} 项）；"
                       f"选用 {best.material_id}：{best.verdict_text}（{crit}）")
             if best.manual_review_flags:
                 reason += f"；需人工终审：{'/'.join(best.manual_review_flags)}"
@@ -475,51 +505,49 @@ class RequirementMatcher:
         insufficient = [v for v in verdicts if v.verdict == "EVIDENCE_INSUFFICIENT"]
         if insufficient and not any(v.verdict == "FAIL" for v in verdicts):
             return self._entry(req, EVID, cands, [],
-                               "候选业绩均证据不足：无法从现有材料确认五要素成立",
-                               missing=["满足五要素的业绩合同原件（含双方盖章页/签订时间/关键信息页）"],
+                               f"候选业绩均证据不足：无法从现有材料确认{role_text}成立",
+                               missing=["满足要求的业绩合同原件（含双方盖章页/签订时间/关键信息页）"],
                                owner="COMPANY")
         return self._entry(req, FAIL, cands, [],
-                           f"无业绩满足五要素（{crit}）：全部候选均为明确不满足",
-                           missing=[f"满足资格要求的业绩合同（{crit}）"], owner="COMPANY")
+                           f"无业绩满足{role_text}（{crit}）：全部候选均为明确不满足",
+                           missing=[f"满足要求的业绩合同（{crit}）"], owner="COMPANY")
 
     def _h_performance_scoring(self, req, cond):
-        """商务评分"业绩"项：显式引用资格口径（condition_ref），不重新猜五要素。
+        """商务评分"业绩"项：**只**消费 condition_ref 指定的资格条件结果。
 
-        计分规则由本项目条款结构化给出（解析层 _performance_scoring_condition）：
-          * 示例项目A：资格业绩本身得 1 分（基础分），每多 1 项加 1 分，最多加 4 分
-          * 示例项目B：资格业绩不重复计分，每增加 1 项得 1 分，最多加 5 分
+        计分规则由本项目条款结构化给出（解析层 _performance_scoring_condition）；
+        条款没写明计分参数时，这里不编造分值，只报"需人工按评标办法核定"。
+        资格项结果按 requirement_id 缓存，与 requirements 顺序无关，
+        也不会出现"评分项吃到另一条资格业绩口径"的串线。
         """
         ref_id = cond.get("condition_ref")
         ref_req = (self._req_by_id or {}).get(ref_id) if ref_id else None
-        ref_cond = (ref_req or {}).get("condition") if ref_req else None
-        base = self._last_performance_result
-        if (not base and ref_cond and ref_cond.get("rule") == "PERFORMANCE_FIVE_ELEMENTS"):
-            evaluator = FiveElementEvaluator.from_rules_file(
-                self.perf_rules_path, deadline=self.deadline, condition=ref_cond)
-            verdicts = [evaluator.evaluate(m, bidder=self.bidder)
-                        for m in self.repo.by_category("业绩合同")]
-            base = {
-                "selected": next((v.material_id for v in verdicts if v.verdict == "PASS"), None),
-                "pass_ids": [v.material_id for v in verdicts if v.verdict == "PASS"],
-                "verdicts": verdicts,
-                "evidence": [],
-            }
-        if not base or not ref_cond:
+        if not ref_id or not ref_req:
             return self._entry(req, NOTEVAL, [], [],
-                               f"评分业绩引用的资格条件不可解析（condition_ref={ref_id}）",
+                               f"评分业绩未给出可追溯的资格条件引用（condition_ref={ref_id}），"
+                               "不得自行推断业绩口径", owner="COMPILER")
+        ref_cond = ref_req.get("condition") or {}
+        if ref_cond.get("rule") != "PERFORMANCE_FIVE_ELEMENTS":
+            return self._entry(req, NOTEVAL, [], [],
+                               f"评分业绩引用的 {ref_id} 不是五要素业绩条件"
+                               f"（rule={ref_cond.get('rule')}），需人工确认口径",
                                owner="COMPILER")
+        base = self._performance_for(ref_id, ref_cond)
 
         qual_selected = base["selected"]
         exclude = cond.get("exclude_qualification_selected", True)
-        per_item = cond.get("additional_points_per_item", 1)
-        max_add = cond.get("max_additional_items", 0)
-        qual_points = cond.get("qualification_item_points", 0)
+        per_item = cond.get("additional_points_per_item")
+        max_add = cond.get("max_additional_items")
+        qual_points = cond.get("qualification_item_points")
+        # 计分参数必须来自条款；抽不到就不算分，不用历史项目的默认值兜底
+        scorable = None not in (per_item, max_add, qual_points)
 
         score_eligible = [v for v in base["verdicts"]
                           if v.verdict == "PASS"
                           and not (exclude and v.material_id == qual_selected)]
         score_ids = [v.material_id for v in score_eligible]
-        points = qual_points + min(len(score_eligible), max_add) * per_item
+        points = (qual_points + min(len(score_eligible), max_add) * per_item
+                  if scorable else None)
 
         cands = []
         for v in base["verdicts"]:
@@ -531,7 +559,8 @@ class RequirementMatcher:
             elif v.verdict == "PASS":
                 cands.append({"material_id": v.material_id, "status": PASS,
                               "score": per_item,
-                              "reasons": [f"评分可用（+{per_item} 分）"],
+                              "reasons": [f"评分可用（+{per_item} 分）" if per_item is not None
+                                          else "评分可用（单项分值未在条款中明示）"],
                               "eligibility": "SCORE_ELIGIBLE"})
             else:
                 cands.append({"material_id": v.material_id, "status": FAIL,
@@ -541,10 +570,15 @@ class RequirementMatcher:
                                             if e.blocking],
                               "eligibility": "SHOWCASE_ONLY"})
 
+        if scorable:
+            scoring_note = (f"资格业绩（{qual_selected}）"
+                            f"{'计基础分 ' + str(qual_points) + ' 分' if qual_points else '不重复计分'}；"
+                            f"评分新增 {len(score_eligible)} 项 × {per_item} 分（最多 {max_add} 分）")
+        else:
+            scoring_note = ("资格业绩计分规则未在条款中结构化解析，"
+                            "评分新增项数已列明，分值需人工按评标办法核定")
         chain = [{
-            "claim": (f"资格业绩（{qual_selected}）"
-                      f"{'计基础分 ' + str(qual_points) + ' 分' if qual_points else '不重复计分'}；"
-                      f"评分新增 {len(score_eligible)} 项 × {per_item} 分（最多 {max_add} 分）"),
+            "claim": scoring_note,
             "quote": "、".join(score_ids) or "（无额外评分业绩）",
             "material_id": score_ids[0] if score_ids else qual_selected,
             "source_ref": None,
@@ -555,22 +589,36 @@ class RequirementMatcher:
                                "资格业绩未满足，评分业绩无从计分",
                                missing=["满足资格口径的业绩合同"], owner="COMPANY")
 
-        reason = (f"资格选用 {qual_selected}"
-                  f"（{'基础分 ' + str(qual_points) + ' 分' if qual_points else '不重复计分'}），"
-                  f"评分新增 {len(score_eligible)} 项：{'、'.join(score_ids) or '无'}；"
-                  f"本项预计得分 {points} 分")
+        if scorable:
+            reason = (f"资格选用 {qual_selected}"
+                      f"（{'基础分 ' + str(qual_points) + ' 分' if qual_points else '不重复计分'}），"
+                      f"评分新增 {len(score_eligible)} 项：{'、'.join(score_ids) or '无'}；"
+                      f"本项预计得分 {points} 分")
+        else:
+            reason = (f"资格选用 {qual_selected}，评分新增 {len(score_eligible)} 项："
+                      f"{'、'.join(score_ids) or '无'}；"
+                      "计分规则未在条款中明示，得分需人工按评标办法核定")
         return self._entry(req, PASS, cands, chain, reason,
                            selected=(score_ids[0] if score_ids else qual_selected))
+
+    def _h_score_performance_unparsed(self, req, cond):
+        """业绩评分条款的口径没解析出来：交人工，**不得**自动继承资格条件。
+
+        宁可这一项显示"未评估 / 需人工确认"，也不能拿资格业绩口径替它判分——
+        那会把一个没人确认过的评分规则当成事实写进投标决策。
+        """
+        why = cond.get("why") or "评分业绩条款未能解析出可判定的口径"
+        return self._entry(req, NOTEVAL, [], [], f"{why}；需人工确认后重跑", owner="COMPILER")
 
     def _h_credit(self, req, cond):
         """信誉 HARD 条款：requirement-specific 证据映射 + 项目时点有效期。
 
-        v1.5.1 被 GPT 抓出两个问题：
-        * 四条不同的 HARD（信用公示系统严重违法失信 / 失信被执行人 / 行业主管失信惩戒 /
-          骗取中标严重违约）全部拿 M-CREDIT-001 一份材料 PASS——
-          "要求 → 证据 → 判断"必须一一可追溯；
-        * 信用查询日期晚于本项目投标截止日 ——
-          **未来证据不能证明历史投标资格**，所有时间型证据统一 as-of-project。
+        两条纪律（都是被真实事故逼出来的）：
+
+        * **fail-closed**：条款没能映射到具体证据来源时，判"证据不足（需人工确认口径）"，
+          绝不拿任意一份信用查询材料顶上去——那是 fail-open，等于给陌生条款发通行证；
+        * **一个 material 一个 candidate**：候选状态必须与实际判断一致，
+          不允许"总项 PASS、候选还停在 PENDING"这种自相矛盾的产物。
         """
         import re as _re
 
@@ -590,32 +638,32 @@ class RequirementMatcher:
                 rule_hit = m_rule
                 break
 
-        # 2) 按 evidence_any 过滤出"语义对应"的证据素材
-        def _matches(m_material):
-            if not rule_hit:
-                return True
+        if rule_hit is None:
+            # 映射不到 → 证据不足（口径待确认），绝不 fail-open。
+            # 候选状态必须落在封闭词表内：这里是"未评估"，不是"不合格"。
+            cands = [self._cand(m, NOTEVAL,
+                                ["条款未映射到具体证据来源，本条未对该素材作判定"])
+                     for m in all_mats]
+            return self._entry(
+                req, EVID, cands, [],
+                "信用条款未能映射到具体证据来源，需先确认口径（不得以任意信用查询材料顶替）",
+                missing=["与条款语义对应的信用查询证据（口径待确认）"], owner="COMPILER")
+
+        def _semantically_matches(m_material: dict) -> bool:
             blob = _material_blob(m_material)
             return any(kw in blob for kw in rule_hit.get("evidence_any", []))
 
-        matching = [m for m in all_mats if _matches(m)]
-        label = (rule_hit or {}).get("label", "信用查询材料")
-
-        cands = []
-        for m in all_mats:
-            mark = "★" if m in matching else "·"
-            cands.append(self._cand(m, "N/A" if m not in matching else "PENDING",
-                                    [f"{mark} 与本条款证据语义不对应"
-                                     if m not in matching else "语义对应"]))
-
-        if rule_hit and not matching:
-            return self._entry(req, EVID, cands, [],
-                               f"缺少与条款语义对应的证据：{label}",
-                               missing=[label], owner="COMPANY")
-
-        # 3) as-of-project：证据日期必须 <= 投标截止日（未来证据无效）
-        fresh, future, undated = [], [], []
+        matching = [m for m in all_mats if _semantically_matches(m)]
+        label = rule_hit.get("label", "信用查询材料")
         deadline_date = _parse_date(self.deadline) if self.deadline else None
-        for m in matching:
+
+        # 2) 一个 material 只生成一个候选，状态与实际判断一致
+        cands: list[dict] = []
+        fresh, future, undated, other = [], [], [], []
+        for m in all_mats:
+            if m not in matching:
+                other.append(m)
+                continue
             d = _parse_date(m.get("issue_date"))
             if d is None:
                 undated.append(m)
@@ -623,19 +671,24 @@ class RequirementMatcher:
                 fresh.append(m)
             else:
                 future.append(m)
+        for m in other:
+            cands.append(self._cand(m, FAIL, ["与本条款证据语义不对应"]))
+        for m in undated:
+            cands.append(self._cand(m, EVID, ["查询日期未登记"]))
+        for m in future:
+            cands.append(self._cand(
+                m, EVID, [f"查询日期 {m.get('issue_date')} 晚于投标截止日 {self.deadline}"
+                          "（未来证据不能证明历史投标资格）"]))
+        for m in fresh:
+            cands.append(self._cand(
+                m, PASS, [f"查询日期 {m.get('issue_date')}（≤ 投标截止日）"]))
 
-        for m in matching:
-            d = _parse_date(m.get("issue_date"))
-            if d is None:
-                cands.append(self._cand(m, EVID, ["查询日期未登记"]))
-            elif self.deadline and d > _parse_date(self.deadline):
-                cands.append(self._cand(m, EVID,
-                            [f"查询日期 {m.get('issue_date')} 晚于投标截止日 {self.deadline}"
-                             "（未来证据不能证明历史投标资格）"]))
-            else:
-                cands.append(self._cand(m, PASS,
-                            [f"查询日期 {m.get('issue_date')}（≤ 投标截止日）"]))
+        if not matching:
+            return self._entry(req, EVID, cands, [],
+                               f"缺少与条款语义对应的证据：{label}",
+                               missing=[label], owner="COMPANY")
 
+        # 3) as-of-project：证据日期必须 <= 投标截止日（未来证据无效）
         if fresh:
             m = fresh[0]
             chain = [{
@@ -650,20 +703,16 @@ class RequirementMatcher:
             return self._entry(req, PASS, cands, chain, note,
                                selected=m["material_id"])
 
-        if matching:
-            reasons = []
-            if future:
-                reasons.append(f"{len(future)} 项查询日期晚于投标截止日 {self.deadline}"
-                               "（未来证据不能证明历史投标资格）")
-            if undated:
-                reasons.append(f"{len(undated)} 项查询日期未登记")
-            return self._entry(req, EVID, cands, [],
-                               f"{label}证据时间无效：" + "；".join(reasons),
-                               missing=[f"{label}（须在投标截止日 {self.deadline} 前查询）"],
-                               owner="COMPANY")
-
-        return self._entry(req, EVID, [], [],
-                           f"未找到{label}", missing=[label], owner="COMPANY")
+        reasons = []
+        if future:
+            reasons.append(f"{len(future)} 项查询日期晚于投标截止日 {self.deadline}"
+                           "（未来证据不能证明历史投标资格）")
+        if undated:
+            reasons.append(f"{len(undated)} 项查询日期未登记")
+        return self._entry(req, EVID, cands, [],
+                           f"{label}证据时间无效：" + "；".join(reasons),
+                           missing=[f"{label}（须在投标截止日 {self.deadline} 前查询）"],
+                           owner="COMPANY")
 
     def _h_financial(self, req, cond):
         years = cond.get("years") or cond.get("required_years") or [2023, 2024, 2025]

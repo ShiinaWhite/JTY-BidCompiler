@@ -40,8 +40,10 @@ _SCORE_CATALOG = {
     "业绩": dict(
         rid="SCORE-BIZ-PERF", block="商务", points=5, req_type="PERFORMANCE",
         evidence=["业绩合同"], location="七（三）业绩",
-        condition={"rule": "PERFORMANCE_FIVE_ELEMENTS", "scoring": True,
-                   "note": "资格业绩得1分；每多1个有效业绩加1分，最多加4分；证明材料同资格要求"},
+        # 只标记"这是一条业绩评分项"：**是否引用资格口径、每项几分、上限几项
+        # 都必须由条款原文决定**。历史上这里写了项目 A 的计分规则当默认值，
+        # 换个项目就会把别人的口径当成本项目的口径（见 _performance_scoring_condition）。
+        condition={"rule": "PERFORMANCE_FIVE_ELEMENTS", "scoring_candidate": True},
     ),
     "企业综合实力及财务状况": dict(
         rid="SCORE-BIZ-FIN", block="商务", points=2, req_type="FINANCIAL",
@@ -276,10 +278,16 @@ def _extract_qualification_items(blocks: list[_Block], *, pages: int = 3) -> lis
         if last + 1 < min(e, len(combined)):
             nxt = block_at[last + 1]
             cont_end = min(e, len(combined)) - 1
-            cont = nxt.page.hit_from_flat_span(off_at[last + 1], off_at[cont_end] + 1)
-            tail = re.sub(r"\s+", " ", nxt.page.raw[cont.raw_start:cont.raw_end]).strip()
-            if tail:
-                quote = f"{quote} {tail}"
+            # 续页补充只在"确实还是下一段"时做：页码不连续（招标文件只提供了部分页）
+            # 或偏移越界时，宁可不拼续文，也不让解析崩在索引上。
+            try:
+                cont = nxt.page.hit_from_flat_span(off_at[last + 1], off_at[cont_end] + 1)
+            except (IndexError, ValueError):
+                cont = None
+            if cont is not None:
+                tail = re.sub(r"\s+", " ", nxt.page.raw[cont.raw_start:cont.raw_end]).strip()
+                if tail:
+                    quote = f"{quote} {tail}"
         items.append({
             "id": f"QUAL-3-{no}",
             "chapter": "第一章 招标公告",
@@ -298,12 +306,25 @@ def _extract_qualification_items(blocks: list[_Block], *, pages: int = 3) -> lis
 # --------------------------------------------------------------------------- #
 
 #: 1.4.3 各情形的分类（编号 → (类型, 是否需要信誉类证据)）
-_FORBIDDEN_CLASSES: dict[int, tuple[str, bool]] = {
-    **{n: ("OTHER", False) for n in range(1, 9)},      # 关联关系/利害关系
-    **{n: ("QUALIFICATION", False) for n in (9, 10, 11)},  # 主体资格状态
-    **{n: ("CREDIT", True) for n in (12, 13, 14, 15)},     # 不良记录/失信名单/行业主管惩戒
-    16: ("OTHER", False),
-}
+#: 1.4.3 各项的**内容特征**：出现这些词的是"需要信用/信誉材料自证"的不良记录
+_CREDIT_HINTS = ("信用", "失信", "惩戒", "骗取中标", "严重违约", "重大工程质量",
+                 "不良记录", "黑名单")
+#: 主体资格状态类（属于资格判断，但不是信用查询能证明的）
+_STATUS_HINTS = ("暂停", "取消投标资格", "吊销", "责令停业", "清算", "破产", "履约能力")
+
+
+def _forbidden_class(body: str) -> tuple[str, bool]:
+    """1.4.3 各项的类型与"是否需要信用证据"由**内容**判断，不按项号写死。
+
+    1.4.3 的条目数与顺序随平台而异（示例项目是 16 条，其他项目可能 6 条或换顺序）；
+    按第 12～15 项钉死，换一份文件就会把"失信名单"判成承诺类（不去查证据），
+    或把"关联关系"判成信用类（去要一份查不到的查询结果）。
+    """
+    if any(h in body for h in _CREDIT_HINTS):
+        return "CREDIT", True
+    if any(h in body for h in _STATUS_HINTS):
+        return "QUALIFICATION", False
+    return "OTHER", False
 
 
 def _extract_forbidden_situations(blocks: list[_Block]) -> list[dict]:
@@ -358,7 +379,7 @@ def _extract_forbidden_situations(blocks: list[_Block]) -> list[dict]:
         body = _strip_page_footer_digits(body).strip().rstrip("；;")
         if len(body) < 6:
             continue
-        req_type, needs_credit = _FORBIDDEN_CLASSES.get(no, ("OTHER", False))
+        req_type, needs_credit = _forbidden_class(body)
         last = min(end, len(combined)) - 1
         block = block_at[s]
         quote_hit = block.page.hit_from_flat_span(off_at[s], off_at[last] + 1)
@@ -629,8 +650,17 @@ def _extract_weight(blocks: list[_Block]) -> Optional[dict]:
     return None
 
 
-def _extract_commercial_specs(blocks: list[_Block]) -> list[dict]:
+def _extract_commercial_specs(blocks: list[_Block]) -> tuple[list[dict], list[str]]:
+    """关键商务/格式要求：按**模板锚点**抽取，返回 (命中的要求, 未命中的提示)。
+
+    纪律（v1.6 修正）：**招标文件里没有的要求，不应该变成 requirement**。
+    锚点没命中说明这份招标文件根本没写这一条；若照样生成 requirement，
+    matcher 会按 condition 判出 WAIT_COMPANY，凭空给公司派一个不存在的活
+    （例如文件里没有保证金条款，却让公司去交保证金）。
+    未命中的锚点只记 extraction_issue，供人工核对锚点文案是否过时。
+    """
     out: list[dict] = []
+    issues: list[str] = []
     for spec in _COMMERCIAL_SPECS:
         pattern = fold(spec["anchor"])
         hit: Optional[dict] = None
@@ -660,23 +690,11 @@ def _extract_commercial_specs(blocks: list[_Block]) -> list[dict]:
             }
             break
         if hit is None:
-            hit = {
-                "id": spec["rid"],
-                "chapter": spec["chapter"],
-                "source_text": "",
-                "source_page": 0,
-                "source_section": spec["chapter"],
-                "source_quote": None,
-                "req_type": spec["req_type"],
-                "severity": spec["severity"],
-                "condition": dict(spec["condition"]),
-                "condition_text": spec["condition_text"],
-                "evidence_required": spec["evidence_required"],
-                "response_location": spec["response_location"],
-                "not_found": True,
-            }
+            issues.append(f"模板锚点未命中，未生成要求：{spec['rid']}"
+                          f"（{spec['chapter']}）——该招标文件可能未包含此项")
+            continue
         out.append(hit)
-    return out
+    return out, issues
 
 
 # --------------------------------------------------------------------------- #
@@ -767,8 +785,9 @@ def extract_requirements(text: TenderText, *, document_path: str, document_sha25
             "note": f"分值 {item['points']} 分",
         })
 
-    # --- 关键商务/格式要求
-    for item in _extract_commercial_specs(blocks):
+    # --- 关键商务/格式要求（只登记**招标文件里确实写了**的条目）
+    commercial_items, commercial_issues = _extract_commercial_specs(blocks)
+    for item in commercial_items:
         req = {
             "id": item["id"],
             "chapter": item["chapter"],
@@ -783,11 +802,8 @@ def extract_requirements(text: TenderText, *, document_path: str, document_sha25
             "source_section": item["source_section"],
             "source_quote": item["source_quote"],
         }
-        if item.get("not_found"):
-            req["note"] = "未在招标文件中命中锚点，需人工确认"
-            issues.append(f"{item['id']} 未命中锚点：{item['source_section']}")
-            req["status"] = "NOT_EVALUATED"
         add(req)
+    issues.extend(commercial_issues)
 
     # --- 第五章/技术规格书条款（NORMAL；含星号实质性条款时升级为 HARD）
     spec_items, spec_issues = extract_spec_requirements(text)
@@ -830,21 +846,38 @@ def extract_requirements(text: TenderText, *, document_path: str, document_sha25
         })
 
     # ── 评分业绩与资格业绩的引用语义（GPT 1.5.3 第 1/3 项）──
-    # 两个示例项目的商务评分条款都写"要求同资格要求"，但措辞不同：
-    #   示例A：满足资格业绩得1分（资格项本身计基础分），每多1个加1分，最多加4分
-    #   示例B：满足资格业绩基础上，每增加1项得1分，最多加5分（资格项不重复计分）
-    # 若评分项自己再猜一遍五要素，就会落回默认词表（v1.5.2 实测把某项目的业绩
-    # 混进某项目评分）。因此评分条件显式 **引用** 资格条件，并结构化计分规则。
-    qual_perf_id = next(
-        (r["id"] for r in requirements
-         if r.get("severity") == "HARD"
-         and (r.get("condition") or {}).get("rule") == "PERFORMANCE_FIVE_ELEMENTS"),
-        None)
+    # 评分业绩条款：只有在原文**明示引用资格口径**时才允许 condition_ref；
+    # 否则独立解析它自己的口径；解析不出来就交人工，绝不偷偷继承资格条件
+    # （v1.5 的 bug：不管理解不理解，都拿第一条资格业绩顶上）。
+    qual_perf_ids = [r["id"] for r in requirements
+                     if r.get("severity") == "HARD"
+                     and (r.get("condition") or {}).get("rule") == "PERFORMANCE_FIVE_ELEMENTS"]
     for r in requirements:
         c = r.get("condition") or {}
-        if c.get("rule") == "PERFORMANCE_FIVE_ELEMENTS" and c.get("scoring"):
-            r["condition"] = _performance_scoring_condition(
-                r.get("source_text") or "", qual_perf_id)
+        if not c.get("scoring_candidate"):
+            continue
+        text = r.get("source_text") or ""
+        if _references_qualification(text):
+            if len(qual_perf_ids) == 1:
+                r["condition"] = _performance_scoring_condition(text, qual_perf_ids[0])
+            else:
+                r["condition"] = {"rule": "SCORE_PERFORMANCE_UNPARSED",
+                                  "why": "评分条款引用了资格口径，但资格要求中五要素业绩条款"
+                                         f"不唯一（{qual_perf_ids or '无'}），无法确定引用目标"}
+                issues.append(f"{r['id']} 无法唯一确定引用的资格业绩条款"
+                              f"（候选：{qual_perf_ids or '无'}），需人工确认口径")
+        else:
+            own = classify_qualification(text)
+            if own.get("rule") == "PERFORMANCE_FIVE_ELEMENTS":
+                # 评分项自带完整口径（电压/时间/性质/对象）→ 独立条件，不引用资格项
+                r["condition"] = {**own, "scoring": True,
+                                  "classified_from": "评分业绩条款（独立口径，原文未声明同资格要求）"}
+            else:
+                r["condition"] = {"rule": "SCORE_PERFORMANCE_UNPARSED",
+                                  "why": "评分业绩条款未声明同资格要求，且未能从其原文解析出"
+                                         "可判定的业绩口径（电压/时间/性质/对象）"}
+                issues.append(f"{r['id']} 业绩评分口径未能解析（原文未声明同资格要求），"
+                              "需人工确认；不得自动继承资格条件")
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -863,33 +896,52 @@ def load_rules(rules_path: str | Path) -> dict:
     return json.loads(Path(rules_path).read_text(encoding="utf-8"))
 
 
-_SCORING_REFS = ("要求同资格要求", "同投标人资格要求", "业绩要求和证明材料同投标人资格要求")
+#: 评分条款**明示引用资格口径**的通用表述（同投标人资格要求 / 要求同资格要求 /
+#: 同资格审查要求 …）。只有命中这个信号，才允许 condition_ref 指向资格条件。
+_SCORING_REF_RE = re.compile(r"同(?:投标人)?资格(?:审查)?要求")
+
+#: 计分参数（只在原文明示时解析；解析不到就留空，绝不用历史项目的默认值）
+_PER_ITEM_RE = re.compile(r"每(?:多|增加|新增)[^。\x1f]{0,40}?[加得](\d+(?:\.\d+)?)分")
+_MAX_ADD_RE = re.compile(r"最多加(\d+(?:\.\d+)?)分")
+_QUAL_ITEM_POINTS_RE = re.compile(r"资格(?:要求)?业绩(?:本身)?(?:得|计)(\d+(?:\.\d+)?)分")
+
+
+def _references_qualification(text: str) -> bool:
+    """评分条款是否**明示**引用资格要求（而不是我们替它假设引用）。"""
+    return bool(_SCORING_REF_RE.search(text))
 
 
 def _performance_scoring_condition(text: str, qual_perf_id: str | None) -> dict:
     """结构化"要求同资格要求"的评分规则。
 
     不复制五要素词表（防止两份规则漂移），只记 ``condition_ref`` 指向资格条款，
-    并把**本项目自己的计分规则**结构化出来：
-      * qualification_item_points：资格业绩本身得几分（示例项目A=1，示例项目B=0）
+    并把**本项目自己在原文里写明的**计分规则结构化出来：
+
+      * qualification_item_points：资格业绩本身计几分（原文写"资格业绩得N分"才有；
+        只写"不重复计分"时为 0）
       * additional_points_per_item / max_additional_items：每增加一项的得分与上限
-      * exclude_qualification_selected：资格选用是否不重复计分
+        （由"每…得N分"与"最多加M分"换算；任一项原文没写就留 ``None``）
+
+    抽不到的参数一律留空——判分时宁可说"需人工按评标办法核定"，
+    也不能拿别的项目的默认值凑一个像样的数。
     """
-    per_item = 1
-    max_additional = 4
-    qual_points = 0
-    m = re.search(r"最多加(\d+)分", text)
-    if m:
-        max_additional = int(m.group(1))
-    m = re.search(r"资格要求业绩得(\d+)分", text)
-    if m:
-        qual_points = int(m.group(1))
+    per_item = float(m.group(1)) if (m := _PER_ITEM_RE.search(text)) else None
+    cap_points = float(m.group(1)) if (m := _MAX_ADD_RE.search(text)) else None
+    max_items = None
+    if cap_points is not None and per_item:
+        max_items = int(cap_points // per_item)
+
+    qual_points = float(m.group(1)) if (m := _QUAL_ITEM_POINTS_RE.search(text)) else None
+    if qual_points is None and "不重复计分" in text:
+        qual_points = 0.0
+
     return {
         "rule": "PERFORMANCE_SCORING",
         "condition_ref": qual_perf_id,
         "additional_points_per_item": per_item,
-        "max_additional_items": max_additional,
+        "max_additional_items": max_items,
+        "max_additional_points": cap_points,
         "qualification_item_points": qual_points,
         "exclude_qualification_selected": "不重复计分" in text,
-        "classified_from": "评分业绩条款（要求同资格要求）",
+        "classified_from": "评分业绩条款（原文声明同资格要求）",
     }

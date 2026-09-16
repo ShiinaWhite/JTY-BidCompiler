@@ -47,13 +47,10 @@ _DATE_RE = re.compile(r"(20\d{2})\s*[-年./]\s*(\d{1,2})\s*[-月./]\s*(\d{1,2})"
 _STRONG_OBJECT_VERBS = ("改造", "维修", "检修", "抢修", "更换", "升级", "维护", "定检")
 _WEAK_OBJECT_VERBS = ("检查", "试验", "检测", "清扫", "巡视")
 
-# 线路类对象词：出现这些且**没有**任何设备类词时，性质关键词不算数
-_LINE_WORDS = ("线路", "缆化", "电缆隧道", "杆塔", "光缆", "架空", "导线", "铁塔")
-# 设备类**通用**词（只作语境护栏：判断"改造/维修"是不是作用在设备本体上）。
-# 这不是对象默认值：对象词一律来自本项目条款（E4.required_any）。
-_OBJECT_WORDS = ("设备", "变配电", "柜", "变压器", "间隔", "继电保护", "配电", "装置", "仪器")
-
-_WINDOW = 30  # 关键词上下文窗口（字符）
+# 关键词上下文窗口（字符）
+_WINDOW = 30
+#: 判断"性质词是不是被否定性搭配吸收"时，向左右各看几个字
+_NEGATION_GAP = 3
 
 
 @dataclass
@@ -66,7 +63,18 @@ class ElementResult:
 
     @property
     def blocking(self) -> bool:
+        """硬阻断：明确不满足 / 未知（这两类让整体判 FAIL 或证据不足）。"""
         return self.status in (NOT_SATISFIED, UNKNOWN)
+
+    @property
+    def blocks_pass(self) -> bool:
+        """是否阻断「明确满足」。
+
+        五要素必须**全部 SATISFIED** 才允许 PASS：PARTIAL（例如对象词只出现在
+        检查/试验类语境里）同样阻断 PASS，只是它属"证据不足"而不是"明确不满足"，
+        因此在报告里单列（``partial_elements``），不与硬阻断混为一谈。
+        """
+        return self.status != SATISFIED
 
 
 @dataclass
@@ -76,6 +84,7 @@ class PerformanceVerdict:
     verdict: str                       # PASS / FAIL / EVIDENCE_INSUFFICIENT
     elements: list[ElementResult]
     blocking_elements: list[str]
+    partial_elements: list[str] = dc_field(default_factory=list)
     manual_review_flags: list[str] = dc_field(default_factory=list)
 
     @property
@@ -89,6 +98,7 @@ class PerformanceVerdict:
             "verdict": self.verdict,
             "verdict_text": self.verdict_text,
             "blocking_elements": self.blocking_elements,
+            "partial_elements": self.partial_elements,
             "manual_review_flags": self.manual_review_flags,
             "elements": [
                 {
@@ -170,10 +180,16 @@ class FiveElementEvaluator:
             self._e5_nature(material, spans),
         ]
         blocking = [r.element_id for r in results if r.blocking]
+        partial = [r.element_id for r in results if r.status == PARTIAL]
 
+        # 判定顺序（五要素必须全部 SATISFIED 才 PASS）：
+        #   任一 NOT_SATISFIED            → FAIL
+        #   任一 UNKNOWN / PARTIAL        → EVIDENCE_INSUFFICIENT（PARTIAL 不得放行，
+        #                                   也不得被拔高成 FAIL——它只是"没认定"）
+        #   否则                          → PASS
         if any(r.status == NOT_SATISFIED for r in results):
             verdict = "FAIL"
-        elif blocking:
+        elif blocking or partial or any(r.blocks_pass for r in results):
             verdict = "EVIDENCE_INSUFFICIENT"
         else:
             verdict = "PASS"
@@ -185,6 +201,7 @@ class FiveElementEvaluator:
             verdict=verdict,
             elements=results,
             blocking_elements=blocking,
+            partial_elements=partial,
             manual_review_flags=flags,
         )
 
@@ -345,47 +362,70 @@ class FiveElementEvaluator:
     # ------------------------------------------------------------------ #
     # E5 工作性质
     def _e5_nature(self, material: dict, spans: list[dict]) -> ElementResult:
+        """合同的工作性质是否属于本条要求的性质。
+
+        分工（这是 v1.6 的修正）：**"这项工作是不是作用在本项目对象上"由 E4 判**
+        （对象词必须出自本项目条款，且处在作业语境里）；E5 只判"合同里是否存在
+        本条要求的性质表述"。因此这里**不再**按"线路/设备"这种对象品类做全局先验——
+        那种写法会误伤"本项目对象本来就是线路/铁塔"的项目。
+
+        E5 唯一要挡的是**搭配性否定**：同一个性质词出现在"缆化改造""线路迁改"
+        这类**本条款明确排除的**搭配里时，不算本条款要求的性质。排除词表来自
+        本条 condition 的 ``reject_if_only``（源自招标原文），并且在某个词同时
+        属于 accept 时（例如项目要求的就是"维护维修"）不再当作否定词。
+        """
         spec = self.params.get("E5", {})
         name = spec.get("name", "工作性质")
-        accept = spec.get("accept_any", ["改造", "维修", "检修", "抢修"])
+        accept = [w for w in (spec.get("accept_any") or []) if w]
+        rejects = [w for w in (spec.get("reject_if_only") or []) if w and w not in accept]
         if not spans:
             return ElementResult("E5", name, UNKNOWN, "无证据片段，无法确认工作性质", [])
         evidence: list[dict] = []
-        line_only: list[dict] = []
-        rejects: list[dict] = []
+        discounted: list[dict] = []
+        reject_hits: list[dict] = []
 
         for span in spans:
             text = span.get("text", "")
             for kw in accept:
                 for m in re.finditer(re.escape(kw), text):
-                    window = text[max(0, m.start() - _WINDOW): m.end() + _WINDOW]
                     quote = _excerpt(text, kw)
-                    is_line = any(w in window for w in _LINE_WORDS)
-                    has_object = any(w in window for w in _OBJECT_WORDS)
-                    if is_line and not has_object:
-                        line_only.append({"quote": quote, "source_ref": span.get("source_ref")})
+                    hit = {"quote": quote, "source_ref": span.get("source_ref"),
+                           "source_page": span.get("source_page")}
+                    negated_by = _negated_by(text, m.start(), m.end(), rejects)
+                    if negated_by:
+                        discounted.append({**hit, "context": negated_by})
                     else:
-                        evidence.append({"quote": quote, "source_ref": span.get("source_ref"),
-                                         "source_page": span.get("source_page")})
-            for rk in spec.get("reject_if_only", []):
+                        evidence.append(hit)
+            for rk in rejects:
                 if rk in text:
-                    rejects.append({"quote": _excerpt(text, rk),
-                                    "source_ref": span.get("source_ref")})
+                    reject_hits.append({"quote": _excerpt(text, rk),
+                                        "source_ref": span.get("source_ref")})
 
         if evidence:
-            return ElementResult("E5", name, SATISFIED,
-                                 f"合同原文含改造/维修类责任表述（{'/'.join(accept)}）", evidence)
-        if line_only:
+            reason = f"合同原文含改造/维修类责任表述（{'/'.join(accept)}）"
+            if discounted:
+                ctx = "、".join(sorted({d["context"] for d in discounted}))
+                reason += (f"；另有 {len(discounted)} 处出现在『{ctx}』这类"
+                           "本条款排除的搭配中，未计入")
+            return ElementResult("E5", name, SATISFIED, reason, evidence)
+        if discounted:
+            first = discounted[0]
+            ctx = "、".join(sorted({d["context"] for d in discounted}))
+            return ElementResult(
+                "E5", name, NOT_SATISFIED,
+                f"性质关键词（{'/'.join(accept)}）仅出现在『{ctx}』这类本条款排除的搭配中，"
+                f"不构成要求的改造/维修类作业；相关原文：「{first['quote']}」",
+                discounted)
+        if reject_hits:
+            detail = "、".join(sorted({q["quote"].split("：")[0][:14]
+                                       for q in reject_hits[:3]}))
             return ElementResult("E5", name, NOT_SATISFIED,
-                                 f"性质关键词（{'/'.join(accept)}）仅出现在线路/缆化语境，"
-                                 "不构成对设备本体的改造或维修", line_only)
-        detail = "、".join(sorted({q["quote"].split("：")[0][:14] for q in rejects[:3]}))
+                                 f"合同证据片段未出现改造/维修/检修/抢修等性质表述；"
+                                 f"仅有新建/安装/试验/检测类表述（{detail}）",
+                                 reject_hits[:3])
         return ElementResult(
             "E5", name, NOT_SATISFIED,
-            "合同证据片段未出现改造/维修/检修/抢修等性质表述"
-            + (f"；仅有新建/安装/试验/检测类表述（{detail}）" if rejects else ""),
-            rejects[:3],
-        )
+            "合同证据片段未出现本条款要求的工作性质表述", [])
 
     # ------------------------------------------------------------------ #
     def _manual_flags(self, material: dict, results: list[ElementResult],
@@ -413,6 +453,20 @@ class FiveElementEvaluator:
 # --------------------------------------------------------------------------- #
 # helpers
 # --------------------------------------------------------------------------- #
+
+def _negated_by(text: str, start: int, end: int, reject_words: list[str]) -> Optional[str]:
+    """性质词是否被**紧邻的否定搭配**吸收（如"缆化改造""线路迁改"）。
+
+    只看紧邻（左右各 ``_NEGATION_GAP`` 字）——因为要识别的是复合词/紧邻搭配，
+    不是"附近出现过某个词"。远距离共现不算否定，否则会误伤正常表述。
+    """
+    left = text[max(0, start - _NEGATION_GAP):start]
+    right = text[end:end + _NEGATION_GAP]
+    for word in reject_words:
+        if left.endswith(word) or right.startswith(word):
+            return word
+    return None
+
 
 def _parse_date(text: Optional[str]) -> Optional[date]:
     if not text:
